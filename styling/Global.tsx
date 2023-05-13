@@ -44,3 +44,10 @@ export default StyleSheet.create({
 		zIndex: 10,
 	}
 });
+
+/* Border styles */
+export const BorderAll = { borderColor: "#ecece9", borderWidth: 2 };
+export const BorderBottom = { borderBottomColor: "#ecece9", borderBottomWidth: 2 };
+export const BorderLeft = { borderLeftColor: "#ecece9", borderLeftWidth: 2 };
+export const BorderRight = { borderRightColor: "#ecece9", borderRightWidth: 2 };
+export const BorderTop = { borderTopColor: "#ecece9", borderTopWidth: 2 };
