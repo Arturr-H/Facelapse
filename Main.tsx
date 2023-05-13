@@ -5,7 +5,7 @@ import { View, Animated, Dimensions, Easing, GestureResponderEvent, PanResponder
 import Styles from "./styling/Global";
 import React from "react";
 import Header from "./components/header/Header";
-import Navbar, { PrimaryButton } from "./components/nav/Navbar";
+import Navbar from "./components/nav/Navbar";
 import CameraScene from "./scenes/camera/Camera";
 import StackScene from "./scenes/stack/Stack";
 import { NavigationProp } from '@react-navigation/native';
@@ -131,24 +131,11 @@ export default class Main extends React.PureComponent<Props, State> {
 
 				{/* Body */}
 				<View style={Styles.body}>
-					<Animated.View
-						style={{
-							...Styles.sceneContainer,
-							transform: [{ translateX: this.state.scenesPosX }]
-						}}
-					>
-						{/* Camera */}
-						<CameraScene
-							cameraActive={this.state.cameraActive}
-						/>
-
-						{/* Stacks */}
-						<StackScene />
-					</Animated.View>
+					{/* Camera */}
+					<CameraScene
+						cameraActive={this.state.cameraActive}
+					/>
 				</View>
-
-				{/* Navigation bar */}
-				<Navbar body={this.state.body} switch={this.switch} />
 
 				{/* Status bar (where time and battery is) */}
 				<StatusBar style="auto" />
