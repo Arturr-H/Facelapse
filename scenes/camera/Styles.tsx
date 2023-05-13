@@ -25,7 +25,8 @@ export default StyleSheet.create({
 		position: "absolute",
 		resizeMode: "contain",
 
-		opacity: 0.2
+		opacity: 0.2,
+		transform: [{ translateY: 24 }, { translateX: -10 }]
 	},
 
 	backgroundBlur: {
@@ -36,19 +37,27 @@ export default StyleSheet.create({
 		zIndex: 10
 	},
 
-	flashButton: {
-		width: 45,
-		height: 45,
-
-		backgroundColor: "#EF3054",
+	alignContainer: {
+		width: 75,
+		height: 100,
 
 		position: "absolute",
-		top: 125,
-		right: 20,
+		zIndex: 15,
+		top: 425,
+	},
+	alignImage: {
+		width: 75,
+		height: 100,
+		position: "absolute",
 
-		borderRadius: 35,
-		display: "flex",
-		justifyContent: "center",
-			alignItems: "center"
+		opacity: 0.3
+	},
+
+	onionskinImage: {
+		width: "100%",
+		height: "100%",
+		position: "absolute",
+
+		opacity: 0
 	}
 });
