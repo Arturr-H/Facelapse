@@ -5,9 +5,7 @@ import { View, Animated, Dimensions, Easing, GestureResponderEvent, PanResponder
 import Styles from "./styling/Global";
 import React from "react";
 import Header from "./components/header/Header";
-import Navbar from "./components/nav/Navbar";
 import CameraScene from "./scenes/camera/Camera";
-import StackScene from "./scenes/stack/Stack";
 import { NavigationProp } from '@react-navigation/native';
 
 /* Constants */
@@ -127,14 +125,15 @@ export default class Main extends React.PureComponent<Props, State> {
 		return (
 			<View style={Styles.container}>
 				{/* Static header */}
-				<Header />
+				<Header
+					rightButtonIcon={require("./assets/icons/dark/redo.png")}
+					rightButtonOnPress={() => this.props.navigation?.navigate("Calibration")}
+				/>
 
 				{/* Body */}
 				<View style={Styles.body}>
 					{/* Camera */}
-					<CameraScene
-						cameraActive={this.state.cameraActive}
-					/>
+					<CameraScene />
 				</View>
 
 				{/* Status bar (where time and battery is) */}
