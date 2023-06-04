@@ -43,7 +43,11 @@ export default StyleSheet.create({
 
 		position: "absolute",
 		zIndex: 15,
-		top: 425,
+		bottom: 175,
+
+		display: "flex",
+		justifyContent: "center",
+			alignItems: "center"
 	},
 	alignImage: {
 		width: 75,

@@ -1,6 +1,6 @@
 
 /* Imports */
-import { View, Image, Animated, Dimensions, Easing } from "react-native";
+import { View, Image, Animated, Dimensions, Easing, Text } from "react-native";
 import Styles from "./Styles";
 import React, { RefObject } from "react";
 import { CameraType, Camera, CameraCapturedPicture, FlashMode, FaceDetectionResult } from "expo-camera";
@@ -14,6 +14,7 @@ import * as MediaLibrary from "expo-media-library";
 import saveImage, { getImageB64 } from "../../funcitonal/OnionskinImage";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Svg, Line } from "react-native-svg";
+import { manipulateAsync, FlipType, SaveFormat } from "expo-image-manipulator";
 
 /* Constants */
 const WIDTH = Dimensions.get("window").width;
@@ -34,31 +35,48 @@ interface State {
 	cameraState: "delete" | "active",
 	flashlightOn: boolean,
 
-	bottomMouthPosition: { x: number, y: number },
+	/// These 4 following structs indicate the current position
+	/// which is being reacognized by the Face-detector API.
 	leftEyePosition: { x: number, y: number },
 	rightEyePosition: { x: number, y: number },
 
-	/// Current total metadata provided by the face-detector API.
-	totalMetadata: string | null,
+	rightMouthPosition: { x: number, y: number },
+	leftMouthPosition: { x: number, y: number },
+
+	/// Total metadata provided by the face calibration
+	totalMetadata: any | null,
 
 	/// The previous photo the user has taken will often
 	/// contain face metadata such as what the coordinates
 	/// of both eyes are and more. 
-	prevFaceMetadata: any | null,
 	mouthEyeDist: number,
 
 	/// The amount of things like mouth pos, mouthEyeDist that
 	/// are not where they should be. Closer to 0 = better.
 	alignError: number,
 
+	/// Only for the aligning face.
 	translateX: number,
 	translateY: number,
 
+	/// The aligning face will fade out / in with this animated value
+	alignFaceOpacity: Animated.Value,
+
+	/// The 4 transparent balls which indicate the calibrated mouth
+	/// features such as mouth left, right and eye left and right
+	/// should be switched to a more vibrant color indicating that
+	/// the user has aligned that feature pretty well.
+	calibrationDots: {
+		leftEye: boolean,
+		rightEye: boolean,
+		leftMouth: boolean,
+		rightMouth: boolean,
+	},
+
+	/// TODO; Might remove because onion skin looks funky?
 	onionskinURI: string | null
 }
-interface Props {
-	cameraActive: boolean,
-}
+interface Props { }
 
 /* Main */
 export default class CameraScene extends React.Component<Props, State> {
@@ -79,16 +97,26 @@ export default class CameraScene extends React.Component<Props, State> {
 			cameraState: "active",
 			flashlightOn: false,
 
-			bottomMouthPosition: { x: 0, y: 0 },
 			leftEyePosition: { x: 0, y: 0 },
 			rightEyePosition: { x: 0, y: 0 },
+			leftMouthPosition: { x: 0, y: 0 },
+			rightMouthPosition: { x: 0, y: 0 },
+
 			totalMetadata: null,
-			prevFaceMetadata: null,
 			mouthEyeDist: 1,
 			alignError: 0,
 
+			calibrationDots: {
+				leftEye: false,
+				rightEye: false,
+				leftMouth: false,
+				rightMouth: false,
+			},
+
 			translateX: 0,
 			translateY: 0,
+
+			alignFaceOpacity: new Animated.Value(1),
 
 			onionskinURI: null
 		};
@@ -103,8 +131,10 @@ export default class CameraScene extends React.Component<Props, State> {
 		this.takePicture = this.takePicture.bind(this);
 		this.setOverlays = this.setOverlays.bind(this);
 		this.clearPicture = this.clearPicture.bind(this);
+		this.alignFaceFade = this.alignFaceFade.bind(this);
 		this.toggleFlashlight = this.toggleFlashlight.bind(this);
 		this.handleFaceDetection = this.handleFaceDetection.bind(this);
+		this.updateCalibrationDots = this.updateCalibrationDots.bind(this);
 
 		/* Vars */
 		this.hasSuccessVibrated = false;
@@ -143,29 +173,62 @@ export default class CameraScene extends React.Component<Props, State> {
 		this.nav.current?.transitionPicButton("default");
 		this.snappedPic.current?.animateToRight();
 
-		await saveImage(this.state.photo!.uri, () => {
+		/* Flip image because for some reason expo
+			camera decides to save it mirrored... */
+		const flippedImage = await manipulateAsync(
+			this.state.photo!.uri,
+			[{ flip: FlipType.Horizontal }],
+			{ compress: 0.1, format: SaveFormat.JPEG }
+		);
+
+		/* Set onion skin overlay image  */
+		// TODO: maybe remove this
+		await saveImage(flippedImage.uri, () => {
 			this.setOverlays();
 		});
 
 		/* Save photo to users media lib */
-		MediaLibrary.saveToLibraryAsync(this.state.photo!.uri);
+		MediaLibrary.saveToLibraryAsync(flippedImage.uri);
 
+		// TODO: Deprecate aka remove this commented code - we don't 
+		// TODO: want to re-save face metadata bc it could lead to drifting,
 		/* Save metadata about face POI:s */
-		if (this.state.totalMetadata) {
-			await AsyncStorage.setItem("@prev_face_metadata", this.state.totalMetadata)
-		}else {
-			console.warn("No face was in picture");
-		}
+		// if (this.state.totalMetadata) {
+		// 	await AsyncStorage.setItem("@prev_face_metadata", this.state.totalMetadata)
+		// }else {
+		// 	console.warn("No face was in picture");
+		// }
 	}
+
 	async setOverlays() {
 		const onionskinURI = await getImageB64();
-		let prevFaceMetadata = await AsyncStorage.getItem("@prev_face_metadata");
-		if (prevFaceMetadata) 
-			prevFaceMetadata = JSON.parse(prevFaceMetadata);
+		let totalMetadata = await AsyncStorage.getItem("@calibrated_face_metadata");
+		if (totalMetadata) 
+			totalMetadata = JSON.parse(totalMetadata);
 
-		console.log(prevFaceMetadata);
+		this.setState({ onionskinURI, totalMetadata });
+	}
 
-		this.setState({ onionskinURI, prevFaceMetadata });
+	/* Update the calibration dots to indicate
+		wether the user is aligned well or not  */
+	updateCalibrationDots() {
+		const mdata = this.state.totalMetadata;
+
+		this.setState({
+			calibrationDots: {
+				leftEye: this.shouldActivate(this.state.leftEyePosition, mdata.leftEyePosition),
+				rightEye: this.shouldActivate(this.state.rightEyePosition, mdata.rightEyePosition),
+				rightMouth: this.shouldActivate(this.state.rightMouthPosition, mdata.rightMouthPosition),
+				leftMouth: this.shouldActivate(this.state.leftMouthPosition, mdata.leftMouthPosition),
+			}
+		})
+	}
+	shouldActivate(n1: { x: number, y: number }, n2: { x: number, y: number }): boolean {
+		const activationThreshhold: number = 5;
+		const dx = Math.abs(n1.x - n2.x);
+		const dy = Math.abs(n1.y - n2.y);
+
+		return (dx + dy < activationThreshhold) ? true : false;
 	}
 
 	/* Flashlight */
@@ -175,17 +238,54 @@ export default class CameraScene extends React.Component<Props, State> {
 	}
 
 	/* Face detection */
+	/* UGLY CODE PLEASE DON'T OPEN! (for your own safety) */
 	handleFaceDetection(faces: FaceDetectionResult) {
 		// TODO: fix multiple faces swapping
 		const face = faces.faces[0];
 
-		if (face && !this.state.takingPicture) {
-			// @ts-ignore
-			const { bottomMouthPosition, leftEyePosition, rightEyePosition } = face;
-			const mouthEyeDist = (bottomMouthPosition.y - (rightEyePosition.y + leftEyePosition.y) / 2) / 100;
+		/* If there are no faces */
+		if (faces.faces.length === 0) return this.alignFaceFade("out");
 
-			const translateX = (((this.state.rightEyePosition.x + this.state.leftEyePosition.x) / 2) * -1 + Dimensions.get("window").width / 2);
-			const translateY = (((this.state.rightEyePosition.y + this.state.leftEyePosition.y) / 2) * -1 + Dimensions.get("window").height / 2);
+		/* Face found */
+		if (face && !this.state.takingPicture) {
+			this.alignFaceFade("in");
+
+			// @ts-ignore
+			const { rightMouthPosition, leftMouthPosition, leftEyePosition, rightEyePosition } = face;
+			const [calibratedLeftMouthPosition, calibratedRightMouthPosition] =
+				[this.state.totalMetadata.leftMouthPosition,
+				this.state.totalMetadata.rightMouthPosition];
+			const [calibratedLeftEyePosition, calibratedRightEyePosition] =
+				[this.state.totalMetadata.leftEyePosition,
+				this.state.totalMetadata.rightEyePosition];
+
+			/*
+				Average values,
+				C = Calibrated,
+				R = Recently captured,
+				M = Mouth,
+				E = Eyes,
+				Y = y axis
+			*/
+			const C_M_Y = ((calibratedLeftMouthPosition.y + calibratedRightMouthPosition.y) / 2);
+			const C_E_Y = ((calibratedLeftEyePosition.y + calibratedRightEyePosition.y) / 2);
+			const C_M_X = ((calibratedLeftMouthPosition.x + calibratedRightMouthPosition.x) / 2);
+			const C_E_X = ((calibratedLeftEyePosition.x + calibratedRightEyePosition.x) / 2);
+
+			const R_M_Y = ((rightMouthPosition.y + leftMouthPosition.y) / 2);
+			const R_E_Y = ((rightEyePosition.y + leftEyePosition.y) / 2)
+			const R_M_X = ((rightMouthPosition.x + leftMouthPosition.x) / 2);
+			const R_E_X = ((rightEyePosition.x + leftEyePosition.x) / 2)
+
+			/*
+				The distance between the current captured faces'
+				mouth and eye positions compared to the calibrated
+				mouth and eye positions features.
+			*/
+			const mouthEyeDist = (C_M_Y - C_E_Y) / (R_M_Y - R_E_Y);
+
+			const translateX = (C_M_X - R_M_X) + (C_E_X - R_E_X);
+			const translateY = (C_M_Y - R_M_Y) + (C_E_Y - R_E_Y);
 
 			const alignError = Math.abs(translateX) + Math.abs(translateY) + Math.abs(mouthEyeDist * 5);
 
@@ -197,12 +297,28 @@ export default class CameraScene extends React.Component<Props, State> {
 			}
 
 			this.setState({
-				bottomMouthPosition, leftEyePosition, rightEyePosition, mouthEyeDist,
+				leftEyePosition, rightEyePosition,
+				rightMouthPosition, leftMouthPosition,
+				mouthEyeDist,
 				translateX, translateY,
 				alignError, // *5 to increase the error
-				totalMetadata: JSON.stringify(face)
-			})
+			}, () => {
+				this.updateCalibrationDots();
+			});
 		}
+	}
+
+	/* The little face which gives you an idea of what 
+		direction you should move your face to center
+		it, will fade out when there are no faces on
+		screen and fade in when there is */
+	alignFaceFade(to: "out" | "in"): void {
+		Animated.timing(this.state.alignFaceOpacity, {
+			toValue: to === "out" ? 0 : 1,
+			duration: 50,
+			easing: Easing.inOut(Easing.ease),
+			useNativeDriver: true
+		}).start();
 	}
 
 	/* Render */
@@ -211,7 +327,7 @@ export default class CameraScene extends React.Component<Props, State> {
 			<View style={Styles.container}>
 
 				{/* Alignings */}
-				<View style={Styles.alignContainer}>
+				{this.state.takingPicture === false && <Animated.View style={[Styles.alignContainer, { opacity: this.state.alignFaceOpacity }]}>
 					<Image
 						style={[Styles.alignImage, {
 							transform: [
@@ -226,50 +342,32 @@ export default class CameraScene extends React.Component<Props, State> {
 					<Image
 						style={[Styles.alignImage, {
 							transform: [
-								{ translateX: this.state.translateX / -50 },
-								{ translateY: this.state.translateY / -50 },
-							]
+								{ translateX: this.state.translateX / -10 },
+								{ translateY: this.state.translateY / -10 },
+							],
 						}]}
 						source={require("../../assets/align/align-outline.png")}
 					/>
-				</View>
+				</Animated.View>}
 
-				{this.state.prevFaceMetadata && 
+				{(this.state.totalMetadata !== null && this.state.takingPicture === false) && 
 					<>
-						<Ball
-							size={10}
-							left={this.state.prevFaceMetadata.leftEyePosition.x}
-							top={this.state.prevFaceMetadata.leftEyePosition.y}
-							stroke="#f00"
-						/>
-						<Ball
-							size={10}
-							left={this.state.prevFaceMetadata.rightEyePosition.x}
-							top={this.state.prevFaceMetadata.rightEyePosition.y}
-							stroke="#f00"
-						/>
+						{/* Eyes */}
+						<Ball size={10} left={this.state.totalMetadata.leftEyePosition.x} top={this.state.totalMetadata.leftEyePosition.y} stroke={this.state.calibrationDots.leftEye == true ? "#FBAF00d1" : "#FBAF0055"} />
+						<Ball size={10} left={this.state.totalMetadata.rightEyePosition.x} top={this.state.totalMetadata.rightEyePosition.y} stroke={this.state.calibrationDots.rightEye == true ? "#FBAF00d1" : "#FBAF0055"} />
 
+						{/* Mouth */}
+						<Ball size={5} left={this.state.totalMetadata.leftMouthPosition.x} top={this.state.totalMetadata.leftMouthPosition.y} stroke={this.state.calibrationDots.leftMouth == true ? "#FBAF00d1" : "#FBAF0055"} />
+						<Ball size={5} left={this.state.totalMetadata.rightMouthPosition.x} top={this.state.totalMetadata.rightMouthPosition.y} stroke={this.state.calibrationDots.rightMouth == true ? "#FBAF00d1" : "#FBAF0055"} />
 
-						<Ball
-							size={5}
-							left={WIDTH/2 - MOUTH_OVERLAY_WIDTH}
-							top={HEIGHT/2 + 100}
-							stroke="#f0f"
-						/>
-						<Ball
-							size={5}
-							left={WIDTH/2 + MOUTH_OVERLAY_WIDTH}
-							top={HEIGHT/2 + 100}
-							stroke="#f0f"
-						/>
-
+						{/* Svg mouth lines */}
 						<Svg height="100%" width="100%" style={{ position: "absolute", zIndex: 14 }}>
 							<Line
-								x1={WIDTH/2 - MOUTH_OVERLAY_WIDTH}
-								y1={HEIGHT/2 + 100}
-								x2={WIDTH/2 + MOUTH_OVERLAY_WIDTH}
-								y2={HEIGHT/2 + 100}
-								stroke="#f0f"
+								x1={this.state.totalMetadata.leftMouthPosition.x}
+								y1={this.state.totalMetadata.leftMouthPosition.y}
+								x2={this.state.totalMetadata.rightMouthPosition.x}
+								y2={this.state.totalMetadata.rightMouthPosition.y}
+								stroke="#FBAF0055"
 								strokeWidth="2"
 							/>
 						</Svg>
@@ -282,36 +380,25 @@ export default class CameraScene extends React.Component<Props, State> {
 				</Modal>}
 
 				{/* Background blur (animated) */}
-				<BlurView intensity={this.state.photo !== null ? 80 : 0} tint="dark" style={Styles.backgroundBlur} />
+				{/* <BlurView intensity={this.state.photo !== null ? 80 : 0} tint="dark" style={Styles.backgroundBlur} /> */}
 
 				{/* Camera (only active when view visible) */}
-				{
-					this.props.cameraActive === true
-					? <Camera
-						ref={this.camera}
-						style={[Styles.camera, {
-							// transform: [
-							// 	{ translateX: ((this.state.rightEyePosition.x + this.state.leftEyePosition.x) / 2) * -1 + Dimensions.get("window").width / 2 },
-							// 	{ translateY: ((this.state.rightEyePosition.y + this.state.leftEyePosition.y) / 2) * -1 + Dimensions.get("window").height / 2 },
-							// ]
-						}]}
-						type={CameraType.front}
-						flashMode={this.state.flashlightOn ? FlashMode.on : FlashMode.off}
-						onFacesDetected={this.handleFaceDetection}
-						
-						faceDetectorSettings={{
-							mode: FaceDetector.FaceDetectorMode.fast,
-							detectLandmarks: FaceDetector.FaceDetectorLandmarks.all,
-							runClassifications: FaceDetector.FaceDetectorClassifications.none,
-							minDetectionInterval: 5,
-							tracking: true,
-						}}
-					>
-					
-					</Camera>
-					: null
-				}
-
+				<Camera
+					ref={this.camera}
+					style={Styles.camera}
+					type={CameraType.front}
+					flashMode={this.state.flashlightOn ? FlashMode.on : FlashMode.off}
+					onFacesDetected={this.handleFaceDetection}
+					faceDetectorSettings={{
+						mode: FaceDetector.FaceDetectorMode.fast,
+						detectLandmarks: FaceDetector.FaceDetectorLandmarks.all,
+						runClassifications: FaceDetector.FaceDetectorClassifications.none,
+						minDetectionInterval: 5,
+						tracking: true,
+					}}
+				/>
+				
+				{/* Onion skin image */}
 				{this.state.onionskinURI && <Image style={Styles.onionskinImage} source={{ uri: this.state.onionskinURI }} />}
 
 				{/* Navbar */}
@@ -405,7 +492,6 @@ class SnappedPicture extends React.PureComponent<SnappedPictureProps, SnappedPic
 				<Poster
 					size="normal"
 					date={Date.now()}
-					randomX={false}
 					source={{ uri: this.props.photo?.uri }}
 				/>
 			</Animated.View>
