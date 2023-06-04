@@ -389,10 +389,10 @@ export default class CameraScene extends React.Component<Props, State> {
 				<Camera
 					ref={this.camera}
 					style={[Styles.camera, {
-						transform: [
-							{ translateX: ((this.state.rightEyePosition.x + this.state.leftEyePosition.x) / 2) * -1 + Dimensions.get("window").width / 2 },
-							{ translateY: ((this.state.rightEyePosition.y + this.state.leftEyePosition.y) / 2) * -1 + Dimensions.get("window").height / 2 },
-						]
+						// transform: [
+						// 	{ translateX: ((this.state.rightEyePosition.x + this.state.leftEyePosition.x) / 2) * -1 + Dimensions.get("window").width / 2 },
+						// 	{ translateY: ((this.state.rightEyePosition.y + this.state.leftEyePosition.y) / 2) * -1 + Dimensions.get("window").height / 2 },
+						// ]
 					}]}
 					type={CameraType.front}
 					flashMode={this.state.flashlightOn ? FlashMode.on : FlashMode.off}
