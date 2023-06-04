@@ -241,13 +241,16 @@ export default class CameraScene extends React.Component<Props, State> {
 	/* UGLY CODE PLEASE DON'T OPEN! (for your own safety) */
 	handleFaceDetection(faces: FaceDetectionResult) {
 		// TODO: fix multiple faces swapping
-		const face = faces.faces[0];
+		const face = faces.faces[0] as any;
 
 		/* If there are no faces */
 		if (faces.faces.length === 0) return this.alignFaceFade("out");
 
 		/* Face found */
-		if (face && !this.state.takingPicture) {
+		if (
+			face && !this.state.takingPicture
+			&& this.state.totalMetadata
+		) {
 			this.alignFaceFade("in");
 
 			// @ts-ignore
@@ -385,7 +388,12 @@ export default class CameraScene extends React.Component<Props, State> {
 				{/* Camera (only active when view visible) */}
 				<Camera
 					ref={this.camera}
-					style={Styles.camera}
+					style={[Styles.camera, {
+						transform: [
+							{ translateX: ((this.state.rightEyePosition.x + this.state.leftEyePosition.x) / 2) * -1 + Dimensions.get("window").width / 2 },
+							{ translateY: ((this.state.rightEyePosition.y + this.state.leftEyePosition.y) / 2) * -1 + Dimensions.get("window").height / 2 },
+						]
+					}]}
 					type={CameraType.front}
 					flashMode={this.state.flashlightOn ? FlashMode.on : FlashMode.off}
 					onFacesDetected={this.handleFaceDetection}
