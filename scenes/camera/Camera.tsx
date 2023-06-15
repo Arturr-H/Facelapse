@@ -1,6 +1,6 @@
 
 /* Imports */
-import { View, Image, Animated, Dimensions, Easing, Text } from "react-native";
+import { View, Image, Animated, Dimensions, Easing, Text, TransformsStyle } from "react-native";
 import Styles from "./Styles";
 import React, { RefObject } from "react";
 import { CameraType, Camera, CameraCapturedPicture, FlashMode, FaceDetectionResult } from "expo-camera";
@@ -15,6 +15,10 @@ import saveImage, { getImageB64 } from "../../funcitonal/OnionskinImage";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Svg, Line } from "react-native-svg";
 import { manipulateAsync, FlipType, SaveFormat } from "expo-image-manipulator";
+import Globals, { dbg } from "../../funcitonal/Globals";
+import { antiZero, hypotenuse, percentage } from "../../funcitonal/Utils";
+import { withAnchorPoint } from 'react-native-anchor-point';
+import FaceIndicator, { FaceIndicatorItem, toFaceIndicator } from "../../components/face-indicator/FaceIndicator";
 
 /* Constants */
 const WIDTH = Dimensions.get("window").width;
@@ -73,6 +77,14 @@ interface State {
 		rightMouth: boolean,
 	},
 
+	/// There may be more than one face on the screen, if there are
+	/// "face-indicators" will pop up and allow for selecting other
+	/// faces to use
+	faceIndicators: FaceIndicatorItem[],
+
+	/// The index of which face is selected
+	activeFace: number,
+
 	/// TODO; Might remove because onion skin looks funky?
 	onionskinURI: string | null
 }
@@ -85,6 +97,12 @@ export default class CameraScene extends React.Component<Props, State> {
 	snappedPic: RefObject<SnappedPicture>;
 
 	hasSuccessVibrated: boolean;
+
+	/* These values control the end image manipulation to align images */
+	translateX: number;
+	translateY: number;
+	rotation: any[];
+	scale: number;
 
 	constructor(props: Props) {
 		super(props);
@@ -116,6 +134,9 @@ export default class CameraScene extends React.Component<Props, State> {
 			translateX: 0,
 			translateY: 0,
 
+			faceIndicators: [],
+			activeFace: 0,
+
 			alignFaceOpacity: new Animated.Value(1),
 
 			onionskinURI: null
@@ -132,12 +153,17 @@ export default class CameraScene extends React.Component<Props, State> {
 		this.setOverlays = this.setOverlays.bind(this);
 		this.clearPicture = this.clearPicture.bind(this);
 		this.alignFaceFade = this.alignFaceFade.bind(this);
+		this.toggleActiveFace = this.toggleActiveFace.bind(this);
 		this.toggleFlashlight = this.toggleFlashlight.bind(this);
 		this.handleFaceDetection = this.handleFaceDetection.bind(this);
 		this.updateCalibrationDots = this.updateCalibrationDots.bind(this);
 
 		/* Vars */
 		this.hasSuccessVibrated = false;
+		this.translateX = 0;
+		this.translateY = 0;
+		this.rotation = [];
+		this.scale = 0;
 	}
 
 	/* Lifetime */
@@ -160,12 +186,15 @@ export default class CameraScene extends React.Component<Props, State> {
 	}
 	clearPicture() {
 		this.nav.current?.transitionPicButton("default");
-
 		this.setState({
-			photo: null,
 			cameraState: "active",
 			takingPicture: false
-		})
+		});
+		
+		/* Wait for modal picture to dissapear */
+		setTimeout(() => {
+			this.setState({ photo: null })
+		}, 600);
 	}
 
 	/* Use the picture */
@@ -190,16 +219,36 @@ export default class CameraScene extends React.Component<Props, State> {
 		/* Save photo to users media lib */
 		MediaLibrary.saveToLibraryAsync(flippedImage.uri);
 
-		// TODO: Deprecate aka remove this commented code - we don't 
-		// TODO: want to re-save face metadata bc it could lead to drifting,
-		/* Save metadata about face POI:s */
-		// if (this.state.totalMetadata) {
-		// 	await AsyncStorage.setItem("@prev_face_metadata", this.state.totalMetadata)
-		// }else {
-		// 	console.warn("No face was in picture");
-		// }
-	}
+		/* Upload to servers if user has upload key -- DEV ONLY */
+		AsyncStorage.getItem("@dev_uid").then(async uid => {
+			if (typeof uid === "string") {
+				let body = new FormData();
+				body.append("photo", {
+					uri: flippedImage.uri,
+					name: "image.jpg",
+					type: "image/jpeg",
+				} as any);
 
+				dbg(Globals.backendUrl + "post_image");
+				await fetch(Globals.backendUrl + "post_image", {
+					method: "POST",
+					headers: {
+						uid,
+						"leftMouthPosition": percentage("width", this.state.leftMouthPosition.x) + "," + percentage("height", this.state.leftMouthPosition.y),
+						"rightMouthPosition": percentage("width",this.state.rightMouthPosition.x) + "," + percentage("height", this.state.rightMouthPosition.y),
+						"leftEyePosition": percentage("width",this.state.leftEyePosition.x) + "," + percentage("height", this.state.leftEyePosition.y),
+						"rightEyePosition": percentage("width",this.state.rightEyePosition.x) + "," + percentage("height", this.state.rightEyePosition.y),
+					} as any,
+					body,
+				})
+					.then(async e => alert(await e.text()))
+					.catch((_) => {})
+			}
+		})
+
+		/* Return to deafult state */
+		this.clearPicture();
+	}
 	async setOverlays() {
 		const onionskinURI = await getImageB64();
 		let totalMetadata = await AsyncStorage.getItem("@calibrated_face_metadata");
@@ -240,8 +289,8 @@ export default class CameraScene extends React.Component<Props, State> {
 	/* Face detection */
 	/* UGLY CODE PLEASE DON'T OPEN! (for your own safety) */
 	handleFaceDetection(faces: FaceDetectionResult) {
-		// TODO: fix multiple faces swapping
-		const face = faces.faces[0] as any;
+		const face = faces.faces[this.state.activeFace] as any;
+		this.setState({ faceIndicators: faces.faces.map(e => toFaceIndicator(e)) })
 
 		/* If there are no faces */
 		if (faces.faces.length === 0) return this.alignFaceFade("out");
@@ -324,8 +373,73 @@ export default class CameraScene extends React.Component<Props, State> {
 		}).start();
 	}
 
+	/* Change what face to have as active */
+	toggleActiveFace(activeFace: number): void {
+		this.setState({ activeFace });
+	}
+
 	/* Render */
 	render() {
+		let rotation: TransformsStyle;
+		let translateX: number;
+		let translateY: number;
+		let scale: number;
+
+		if (this.state.totalMetadata) {
+			scale = (
+				(
+					hypotenuse(this.state.totalMetadata.rightEyePosition, this.state.totalMetadata.rightMouthPosition) /
+					antiZero(hypotenuse(this.state.rightEyePosition, this.state.rightMouthPosition))
+				) + (
+					hypotenuse(this.state.totalMetadata.leftEyePosition, this.state.totalMetadata.leftMouthPosition) /
+					antiZero(hypotenuse(this.state.leftEyePosition, this.state.leftMouthPosition))
+				)
+			) / 2;
+
+			translateX = (
+				(((this.state.totalMetadata.leftEyePosition.x + this.state.totalMetadata.rightEyePosition.x) / 2) // mid y ttm
+				- ((this.state.leftEyePosition.x + this.state.rightEyePosition.x) / 2)  // mid y stt
+				+
+				((this.state.totalMetadata.leftMouthPosition.x + this.state.totalMetadata.rightMouthPosition.x) / 2) 
+				- ((this.state.leftMouthPosition.x + this.state.rightMouthPosition.x) / 2))
+				/ 2
+			);
+			translateY = (
+				(((this.state.totalMetadata.leftEyePosition.y + this.state.totalMetadata.rightEyePosition.y) / 2) // mid y ttm
+				- ((this.state.leftEyePosition.y + this.state.rightEyePosition.y) / 2)  // mid y stt
+				+
+				((this.state.totalMetadata.leftMouthPosition.y + this.state.totalMetadata.rightMouthPosition.y) / 2) 
+				- ((this.state.leftMouthPosition.y + this.state.rightMouthPosition.y) / 2))
+				/ 2
+			);
+
+			let rot = Math.atan2(this.state.totalMetadata.rightEyePosition.y - this.state.totalMetadata.leftEyePosition.y, this.state.totalMetadata.rightEyePosition.x - this.state.totalMetadata.leftEyePosition.x) -
+				Math.atan2(this.state.rightEyePosition.y - this.state.leftEyePosition.y, this.state.rightEyePosition.x - this.state.leftEyePosition.x);
+
+			let centerY = 
+				(((this.state.leftEyePosition.y + this.state.rightEyePosition.y) / 2) +
+				((this.state.leftMouthPosition.y + this.state.rightMouthPosition.y) / 2)) / 2;
+			let centerX = 
+				(((this.state.rightEyePosition.x + this.state.rightMouthPosition.x) / 2) +
+				((this.state.leftEyePosition.x + this.state.leftMouthPosition.x) / 2)) / 2;
+			rotation = withAnchorPoint(
+				{ transform: [{ rotate: rot + "rad" }]},
+				{ 
+					x: (centerX) / Dimensions.get("window").width,
+					y: (centerY) / Dimensions.get("window").height
+				},
+				{
+					width: Dimensions.get("window").width,
+					height: Dimensions.get("window").height
+				}
+			);
+
+			this.translateX = translateX;
+			this.translateY = translateY;
+			this.rotation = rotation.transform!;
+			this.scale = scale;
+			// console.log(rotation.transform!);
+		}
 		return (
 			<View style={Styles.container}>
 
@@ -336,7 +450,7 @@ export default class CameraScene extends React.Component<Props, State> {
 							transform: [
 								{ translateX: this.state.translateX / 10 },
 								{ translateY: this.state.translateY / 10 },
-								{ scale: this.state.mouthEyeDist }
+								{ scale: Math.min(this.state.mouthEyeDist, 1.4) },
 							],
 							opacity: this.state.alignError < 300 ? (this.state.alignError / 500) + 0.1 : 0.7
 						}]}
@@ -370,8 +484,8 @@ export default class CameraScene extends React.Component<Props, State> {
 								y1={this.state.totalMetadata.leftMouthPosition.y}
 								x2={this.state.totalMetadata.rightMouthPosition.x}
 								y2={this.state.totalMetadata.rightMouthPosition.y}
-								stroke="#FBAF0055"
-								strokeWidth="2"
+								stroke={this.state.calibrationDots.leftMouth === true && this.state.calibrationDots.rightMouth === true ? "#FBAF00d1" : "#FBAF0055"}
+								strokeWidth="5"
 							/>
 						</Svg>
 					</>
@@ -382,16 +496,35 @@ export default class CameraScene extends React.Component<Props, State> {
 					<SnappedPicture ref={this.snappedPic} photo={this.state.photo} />
 				</Modal>}
 
+				{/* Face indicators */}
+				{this.state.faceIndicators.map((props, index) => 
+					<FaceIndicator
+						{...props}
+						active={index === this.state.activeFace}
+						key={"findc-" + index}
+						onClick={this.toggleActiveFace}
+					/>
+				)}
+
 				{/* Background blur (animated) */}
 				{/* <BlurView intensity={this.state.photo !== null ? 80 : 0} tint="dark" style={Styles.backgroundBlur} /> */}
 
 				{/* Camera (only active when view visible) */}
 				<Camera
 					ref={this.camera}
-					style={[Styles.camera, {
+					style={[Styles.camera, this.state.totalMetadata && {
 						// transform: [
-						// 	{ translateX: ((this.state.rightEyePosition.x + this.state.leftEyePosition.x) / 2) * -1 + Dimensions.get("window").width / 2 },
-						// 	{ translateY: ((this.state.rightEyePosition.y + this.state.leftEyePosition.y) / 2) * -1 + Dimensions.get("window").height / 2 },
+						// 	//@ts-ignore
+						// 	{ scale },
+
+						// 	//@ts-ignore
+						// 	{ translateY },
+
+						// 	//@ts-ignore
+						// 	{ translateX },
+
+						// 	//@ts-ignore
+						// 	...rotation.transform
 						// ]
 					}]}
 					type={CameraType.front}
@@ -415,7 +548,10 @@ export default class CameraScene extends React.Component<Props, State> {
 					ref={this.nav}
 					takePic={this.takePicture}
 					usePic={this.usePic}
-					scrapPic={this.clearPicture}
+					scrapPic={() => {
+						this.snappedPic.current?.animateToLeft();
+						this.clearPicture();
+					}}
 					flashlightOn={this.state.flashlightOn}
 					toggleFlashlight={this.toggleFlashlight}
 				/>
@@ -475,6 +611,26 @@ class SnappedPicture extends React.PureComponent<SnappedPictureProps, SnappedPic
 		}, 500);
 	}
 
+	/* Used when "scrapping" photo */
+	animateToLeft() {
+		Animated.timing(this.state.picturePos, {
+			duration: 1000,
+			toValue: { x: -Dimensions.get("window").width*2, y: -400 },
+			useNativeDriver: true,
+			easing: Easing.inOut(Easing.exp)
+		}).start();
+		Animated.timing(this.state.pictureRotation, {
+			duration: 1000,
+			toValue: -90,
+			useNativeDriver: true,
+			easing: Easing.inOut(Easing.exp)
+		}).start();
+
+		setTimeout(() => {
+			Haptic("medium");
+		}, 500);
+	}
+
 	/* Render */
 	render() {
 		const rotate = this.state.pictureRotation.interpolate({
@@ -507,7 +663,6 @@ class SnappedPicture extends React.PureComponent<SnappedPictureProps, SnappedPic
 	}
 }
 
-
 const Ball = ({ size, left, top, stroke }: { size: number, left: number, top: number, stroke: string }) => {
 	return <View
 		style={{
@@ -517,71 +672,10 @@ const Ball = ({ size, left, top, stroke }: { size: number, left: number, top: nu
 			borderRadius: size/2,
 			backgroundColor: stroke,
 			position: "absolute",
-			zIndex: 112,
+			zIndex: 40,
 
 			left,
 			top
 		}}
 	/>
 }
-// Object {
-// 	"faces": Array [
-// 	  Object {
-// 		"bottomMouthPosition": Object {
-// 		  "x": 38.21041163802147,
-// 		  "y": 479.16458573937416,
-// 		},
-// 		"bounds": Object {
-// 		  "origin": Object {
-// 			"x": -89.08750921487808,
-// 			"y": 282.5083292722702,
-// 		  },
-// 		  "size": Object {
-// 			"height": 257.1333417892456,
-// 			"width": 257.1333417892456,
-// 		  },
-// 		},
-// 		"faceID": 6,
-// 		"leftCheekPosition": Object {
-// 		  "x": -12.116673350334167,
-// 		  "y": 438.98750108480453,
-// 		},
-// 		"leftEarPosition": Object {
-// 		  "x": 3.5312438309192657,
-// 		  "y": 406.4229166805744,
-// 		},
-// 		"leftEyePosition": Object {
-// 		  "x": 4.3770771920681,
-// 		  "y": 378.08749908208847,
-// 		},
-// 		"leftMouthPosition": Object {
-// 		  "x": -2.389589697122574,
-// 		  "y": 471.55208548903465,
-// 		},
-// 		"noseBasePosition": Object {
-// 		  "x": 26.36874458193779,
-// 		  "y": 409.38333344459534,
-// 		},
-// 		"rightCheekPosition": Object {
-// 		  "x": 107.56874725222588,
-// 		  "y": 433.4895842373371,
-// 		},
-// 		"rightEarPosition": Object {
-// 		  "x": 166.77708253264427,
-// 		  "y": 403.0395832359791,
-// 		},
-// 		"rightEyePosition": Object {
-// 		  "x": 88.5374966263771,
-// 		  "y": 374.70416563749313,
-// 		},
-// 		"rightMouthPosition": Object {
-// 		  "x": 86.42291322350502,
-// 		  "y": 465.6312519609928,
-// 		},
-// 		"rollAngle": 1.6829290390014648,
-// 		"yawAngle": -23.166505813598633,
-// 	  },
-// 	],
-// 	"target": 1237,
-// 	"type": "face",
-//   }
