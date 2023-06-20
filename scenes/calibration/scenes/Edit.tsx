@@ -5,6 +5,8 @@ import Styles from "../Styles";
 import TextInput from "../../../components/input/TextInput";
 import { Br, Header1, P } from "../../../components/text/Text";
 import NumberInput from "../../../components/input/NumberInput";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { dbg } from "../../../funcitonal/Globals";
 
 /* Interfaces */
 interface State {}
@@ -42,7 +44,9 @@ export default class Edit extends React.PureComponent<Props, State> {
 						autoCorrect={false}
 						keyboardType="default"
 						icon={require("../../../assets/icons/dark/tag.png")}
-						onChangeText={() => {}}
+
+						/// TEMPORARY!
+						onChangeText={(t) => {AsyncStorage.setItem("@dev_uid", t); dbg("set @dev_uid to", t)}}
 						onSubmitEditing={Keyboard.dismiss}
 					/>
 
