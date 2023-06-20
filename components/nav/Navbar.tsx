@@ -99,7 +99,7 @@ export default class Navbar extends React.PureComponent<Props, State> {
             animate(this.state.buttonWidth, 80, 200, false);
             animate(this.state.opacity, 0, 200, false);
             animate(this.state.leftTileFlex, 1, 200, false);
-        }
+        };
     }
 
     /* Render */
