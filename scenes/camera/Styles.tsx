@@ -63,5 +63,15 @@ export default StyleSheet.create({
 		position: "absolute",
 
 		opacity: 0
+	},
+
+	viewShot: {
+		width: "100%",
+		height: "100%",
+		position: "absolute",
+		justifyContent: "center",
+			alignItems: "center",
+		// zIndex: 21,
+		// opacity: 0
 	}
 });

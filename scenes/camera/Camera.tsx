@@ -2,10 +2,9 @@
 /* Imports */
 import { View, Image, Animated, Dimensions, Easing, Text, TransformsStyle } from "react-native";
 import Styles from "./Styles";
-import React, { RefObject } from "react";
+import React, { RefObject} from "react";
 import { CameraType, Camera, CameraCapturedPicture, FlashMode, FaceDetectionResult } from "expo-camera";
 import Poster from "../../components/poster/Poster";
-import { BlurView } from "expo-blur";
 import Modal from "../../components/modal/Modal";
 import Navbar from "../../components/nav/Navbar";
 import { Haptic } from "../../funcitonal/Haptics";
@@ -13,12 +12,13 @@ import * as FaceDetector from "expo-face-detector";
 import * as MediaLibrary from "expo-media-library";
 import saveImage, { getImageB64 } from "../../funcitonal/OnionskinImage";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { Svg, Line } from "react-native-svg";
 import { manipulateAsync, FlipType, SaveFormat } from "expo-image-manipulator";
 import Globals, { dbg } from "../../funcitonal/Globals";
 import { antiZero, hypotenuse, percentage } from "../../funcitonal/Utils";
 import { withAnchorPoint } from 'react-native-anchor-point';
 import FaceIndicator, { FaceIndicatorItem, toFaceIndicator } from "../../components/face-indicator/FaceIndicator";
+import CalibratedDots from "./CalibratedDots";
+import ViewShot from "react-native-view-shot";
 
 /* Constants */
 const WIDTH = Dimensions.get("window").width;
@@ -86,7 +86,10 @@ interface State {
 	activeFace: number,
 
 	/// TODO; Might remove because onion skin looks funky?
-	onionskinURI: string | null
+	onionskinURI: string | null,
+
+
+	flipped: CameraCapturedPicture | any
 }
 interface Props { }
 
@@ -95,13 +98,16 @@ export default class CameraScene extends React.Component<Props, State> {
 	camera: RefObject<Camera>;
 	nav: RefObject<Navbar>;
 	snappedPic: RefObject<SnappedPicture>;
+	viewShot: RefObject<ViewShot>;
 
 	hasSuccessVibrated: boolean;
 
 	/* These values control the end image manipulation to align images */
 	translateX: number;
 	translateY: number;
-	rotation: any[];
+	centerY: number;
+	centerX: number;
+	rotation: number;
 	scale: number;
 
 	constructor(props: Props) {
@@ -139,13 +145,15 @@ export default class CameraScene extends React.Component<Props, State> {
 
 			alignFaceOpacity: new Animated.Value(1),
 
-			onionskinURI: null
+			onionskinURI: null,
+			flipped: null
 		};
 
 		/* Refs */
+		this.snappedPic = React.createRef();
+		this.viewShot = React.createRef();
 		this.camera = React.createRef();
 		this.nav = React.createRef();
-		this.snappedPic = React.createRef();
 
 		/* Bindings */
 		this.usePic = this.usePic.bind(this);
@@ -162,7 +170,9 @@ export default class CameraScene extends React.Component<Props, State> {
 		this.hasSuccessVibrated = false;
 		this.translateX = 0;
 		this.translateY = 0;
-		this.rotation = [];
+		this.centerX = 0.5;
+		this.centerY = 0.5;
+		this.rotation = 0;
 		this.scale = 0;
 	}
 
@@ -178,9 +188,17 @@ export default class CameraScene extends React.Component<Props, State> {
 		if (!this.state.takingPicture) {
 			this.setState({ takingPicture: true });
 			
-			this.camera.current?.takePictureAsync().then(photo => {
+			this.camera.current?.takePictureAsync().then(async photo => {
 				this.nav.current?.transitionPicButton("confirm");
-				this.setState({ photo, cameraState: "delete" });
+				this.setState({
+					photo,
+					cameraState: "delete",
+					flipped: await manipulateAsync(
+						photo.uri,
+						[{ flip: FlipType.Horizontal }],
+						{ compress: 0.1, format: SaveFormat.JPEG }
+					) 
+				});
 			})
 		}
 	}
@@ -188,7 +206,8 @@ export default class CameraScene extends React.Component<Props, State> {
 		this.nav.current?.transitionPicButton("default");
 		this.setState({
 			cameraState: "active",
-			takingPicture: false
+			takingPicture: false,
+			flipped: null
 		});
 		
 		/* Wait for modal picture to dissapear */
@@ -202,52 +221,62 @@ export default class CameraScene extends React.Component<Props, State> {
 		this.nav.current?.transitionPicButton("default");
 		this.snappedPic.current?.animateToRight();
 
+		console.log(this.rotation, this.translateX, this.translateY, this.scale, this.centerX, this.centerY, Dimensions.get("screen").width, Dimensions.get("screen").height);
+
 		/* Flip image because for some reason expo
 			camera decides to save it mirrored... */
-		const flippedImage = await manipulateAsync(
-			this.state.photo!.uri,
-			[{ flip: FlipType.Horizontal }],
-			{ compress: 0.1, format: SaveFormat.JPEG }
-		);
+		// const flippedImage = await manipulateAsync(
+		// 	this.state.photo!.uri,
+		// 	[{ flip: FlipType.Horizontal }],
+		// 	{ compress: 0.1, format: SaveFormat.JPEG }
+		// );
 
 		/* Set onion skin overlay image  */
 		// TODO: maybe remove this
-		await saveImage(flippedImage.uri, () => {
-			this.setOverlays();
-		});
+		// await saveImage(flippedImage.uri, () => {
+		// 	this.setOverlays();
+		// });
 
 		/* Save photo to users media lib */
-		MediaLibrary.saveToLibraryAsync(flippedImage.uri);
+		// MediaLibrary.saveToLibraryAsync(flippedImage.uri);
+		// this.setState({ flipped: flippedImage }, () => {
+			// });
+
+		/* Capture the view shot (image with transformations) */
+		// @ts-ignore
+		this.viewShot!.current!.capture().then(e => {
+			MediaLibrary.saveToLibraryAsync(e);
+
+			/* Return to deafult state */
+			this.clearPicture();
+		});
 
 		/* Upload to servers if user has upload key -- DEV ONLY */
-		AsyncStorage.getItem("@dev_uid").then(async uid => {
-			if (typeof uid === "string") {
-				let body = new FormData();
-				body.append("photo", {
-					uri: flippedImage.uri,
-					name: "image.jpg",
-					type: "image/jpeg",
-				} as any);
+		// AsyncStorage.getItem("@dev_uid").then(async uid => {
+		// 	if (typeof uid === "string") {
+		// 		let body = new FormData();
+		// 		body.append("photo", {
+		// 			uri: flippedImage.uri,
+		// 			name: "image.jpg",
+		// 			type: "image/jpeg",
+		// 		} as any);
 
-				dbg(Globals.backendUrl + "post_image");
-				await fetch(Globals.backendUrl + "post_image", {
-					method: "POST",
-					headers: {
-						uid,
-						"leftMouthPosition": percentage("width", this.state.leftMouthPosition.x) + "," + percentage("height", this.state.leftMouthPosition.y),
-						"rightMouthPosition": percentage("width",this.state.rightMouthPosition.x) + "," + percentage("height", this.state.rightMouthPosition.y),
-						"leftEyePosition": percentage("width",this.state.leftEyePosition.x) + "," + percentage("height", this.state.leftEyePosition.y),
-						"rightEyePosition": percentage("width",this.state.rightEyePosition.x) + "," + percentage("height", this.state.rightEyePosition.y),
-					} as any,
-					body,
-				})
-					.then(async e => alert(await e.text()))
-					.catch((_) => {})
-			}
-		})
-
-		/* Return to deafult state */
-		this.clearPicture();
+		// 		dbg(Globals.backendUrl + "post_image");
+		// 		await fetch(Globals.backendUrl + "post_image", {
+		// 			method: "POST",
+		// 			headers: {
+		// 				uid,
+		// 				"leftMouthPosition": percentage("width", this.state.leftMouthPosition.x) + "," + percentage("height", this.state.leftMouthPosition.y),
+		// 				"rightMouthPosition": percentage("width",this.state.rightMouthPosition.x) + "," + percentage("height", this.state.rightMouthPosition.y),
+		// 				"leftEyePosition": percentage("width",this.state.leftEyePosition.x) + "," + percentage("height", this.state.leftEyePosition.y),
+		// 				"rightEyePosition": percentage("width",this.state.rightEyePosition.x) + "," + percentage("height", this.state.rightEyePosition.y),
+		// 			} as any,
+		// 			body,
+		// 		})
+		// 			.then(async e => alert(await e.text()))
+		// 			.catch((_) => {})
+		// 	}
+		// })
 	}
 	async setOverlays() {
 		const onionskinURI = await getImageB64();
@@ -381,9 +410,13 @@ export default class CameraScene extends React.Component<Props, State> {
 	/* Render */
 	render() {
 		let rotation: TransformsStyle;
+		let centerX: number;
+		let centerY: number;
 		let translateX: number;
 		let translateY: number;
 		let scale: number;
+		let rot: number;
+
 
 		if (this.state.totalMetadata) {
 			scale = (
@@ -413,13 +446,13 @@ export default class CameraScene extends React.Component<Props, State> {
 				/ 2
 			);
 
-			let rot = Math.atan2(this.state.totalMetadata.rightEyePosition.y - this.state.totalMetadata.leftEyePosition.y, this.state.totalMetadata.rightEyePosition.x - this.state.totalMetadata.leftEyePosition.x) -
+			rot = Math.atan2(this.state.totalMetadata.rightEyePosition.y - this.state.totalMetadata.leftEyePosition.y, this.state.totalMetadata.rightEyePosition.x - this.state.totalMetadata.leftEyePosition.x) -
 				Math.atan2(this.state.rightEyePosition.y - this.state.leftEyePosition.y, this.state.rightEyePosition.x - this.state.leftEyePosition.x);
 
-			let centerY = 
+			centerY = 
 				(((this.state.leftEyePosition.y + this.state.rightEyePosition.y) / 2) +
 				((this.state.leftMouthPosition.y + this.state.rightMouthPosition.y) / 2)) / 2;
-			let centerX = 
+			centerX = 
 				(((this.state.rightEyePosition.x + this.state.rightMouthPosition.x) / 2) +
 				((this.state.leftEyePosition.x + this.state.leftMouthPosition.x) / 2)) / 2;
 			rotation = withAnchorPoint(
@@ -436,60 +469,49 @@ export default class CameraScene extends React.Component<Props, State> {
 
 			this.translateX = translateX;
 			this.translateY = translateY;
-			this.rotation = rotation.transform!;
+			this.rotation = rot * (180 / Math.PI);
 			this.scale = scale;
+			this.centerX = centerX;
+			this.centerY = centerY;
 			// console.log(rotation.transform!);
 		}
 		return (
 			<View style={Styles.container}>
 
 				{/* Alignings */}
-				{this.state.takingPicture === false && <Animated.View style={[Styles.alignContainer, { opacity: this.state.alignFaceOpacity }]}>
+				{(this.state.takingPicture === false && this.state.totalMetadata) && <Animated.View style={[Styles.alignContainer, { opacity: this.state.alignFaceOpacity }]}>
 					<Image
 						style={[Styles.alignImage, {
 							transform: [
 								{ translateX: this.state.translateX / 10 },
 								{ translateY: this.state.translateY / 10 },
 								{ scale: Math.min(this.state.mouthEyeDist, 1.4) },
+
+								// @ts-ignore
+								{ rotate: -rot + "rad" }
+								
 							],
 							opacity: this.state.alignError < 300 ? (this.state.alignError / 500) + 0.1 : 0.7
 						}]}
 						source={require("../../assets/align/align-inner.png")}
 					/>
 					<Image
-						style={[Styles.alignImage, {
-							transform: [
-								{ translateX: this.state.translateX / -10 },
-								{ translateY: this.state.translateY / -10 },
-							],
-						}]}
+						style={Styles.alignImage}
 						source={require("../../assets/align/align-outline.png")}
 					/>
 				</Animated.View>}
 
-				{(this.state.totalMetadata !== null && this.state.takingPicture === false) && 
-					<>
-						{/* Eyes */}
-						<Ball size={10} left={this.state.totalMetadata.leftEyePosition.x} top={this.state.totalMetadata.leftEyePosition.y} stroke={this.state.calibrationDots.leftEye == true ? "#FBAF00d1" : "#FBAF0055"} />
-						<Ball size={10} left={this.state.totalMetadata.rightEyePosition.x} top={this.state.totalMetadata.rightEyePosition.y} stroke={this.state.calibrationDots.rightEye == true ? "#FBAF00d1" : "#FBAF0055"} />
-
-						{/* Mouth */}
-						<Ball size={5} left={this.state.totalMetadata.leftMouthPosition.x} top={this.state.totalMetadata.leftMouthPosition.y} stroke={this.state.calibrationDots.leftMouth == true ? "#FBAF00d1" : "#FBAF0055"} />
-						<Ball size={5} left={this.state.totalMetadata.rightMouthPosition.x} top={this.state.totalMetadata.rightMouthPosition.y} stroke={this.state.calibrationDots.rightMouth == true ? "#FBAF00d1" : "#FBAF0055"} />
-
-						{/* Svg mouth lines */}
-						<Svg height="100%" width="100%" style={{ position: "absolute", zIndex: 14 }}>
-							<Line
-								x1={this.state.totalMetadata.leftMouthPosition.x}
-								y1={this.state.totalMetadata.leftMouthPosition.y}
-								x2={this.state.totalMetadata.rightMouthPosition.x}
-								y2={this.state.totalMetadata.rightMouthPosition.y}
-								stroke={this.state.calibrationDots.leftMouth === true && this.state.calibrationDots.rightMouth === true ? "#FBAF00d1" : "#FBAF0055"}
-								strokeWidth="5"
-							/>
-						</Svg>
-					</>
-				}
+				{/* The calibrated facial features are a bit transparent
+					and indicate where you should place your face on screen */}
+				{/* {(this.state.totalMetadata !== null && this.state.takingPicture === false) && 
+					<CalibratedDots
+						leftEyePosition={this.state.totalMetadata.leftEyePosition}
+						leftMouthPosition={this.state.totalMetadata.leftMouthPosition}
+						rightEyePosition={this.state.totalMetadata.rightEyePosition}
+						rightMouthPosition={this.state.totalMetadata.rightMouthPosition}
+						calibrationDots={this.state.calibrationDots}
+					/>
+				} */}
 
 				{/* Modal */}
 				{this.state.photo && <Modal disable={this.clearPicture}>
@@ -497,17 +519,17 @@ export default class CameraScene extends React.Component<Props, State> {
 				</Modal>}
 
 				{/* Face indicators */}
-				{this.state.faceIndicators.map((props, index) => 
-					<FaceIndicator
-						{...props}
-						active={index === this.state.activeFace}
-						key={"findc-" + index}
-						onClick={this.toggleActiveFace}
-					/>
-				)}
-
-				{/* Background blur (animated) */}
-				{/* <BlurView intensity={this.state.photo !== null ? 80 : 0} tint="dark" style={Styles.backgroundBlur} /> */}
+				{
+					this.state.faceIndicators.length > 1 ?
+					this.state.faceIndicators.map((props, index) => 
+						<FaceIndicator
+							{...props}
+							active={index === this.state.activeFace}
+							key={"findc-" + index}
+							onClick={this.toggleActiveFace}
+						/>
+					) : null
+				}
 
 				{/* Camera (only active when view visible) */}
 				<Camera
@@ -531,13 +553,36 @@ export default class CameraScene extends React.Component<Props, State> {
 					flashMode={this.state.flashlightOn ? FlashMode.on : FlashMode.off}
 					onFacesDetected={this.handleFaceDetection}
 					faceDetectorSettings={{
-						mode: FaceDetector.FaceDetectorMode.fast,
+						mode: FaceDetector.FaceDetectorMode.accurate,
 						detectLandmarks: FaceDetector.FaceDetectorLandmarks.all,
 						runClassifications: FaceDetector.FaceDetectorClassifications.none,
 						minDetectionInterval: 5,
 						tracking: true,
 					}}
 				/>
+
+				<View pointerEvents="none" style={Styles.viewShot}>
+					<ViewShot style={Styles.viewShot} ref={this.viewShot}>
+						{this.state.flipped && <Image style={[Styles.viewShot, {
+							transform: [
+								//@ts-ignore
+								{ scale },
+
+								// { scaleX: -1 },
+
+								//@ts-ignore
+								{ translateY },
+
+								//@ts-ignore
+								{ translateX },
+
+								//@ts-ignore
+								...rotation.transform
+							]
+						}]} source={this.state.flipped} />}
+						{/* require("../../assets/splash.png") */}
+					</ViewShot>
+				</View>
 				
 				{/* Onion skin image */}
 				{this.state.onionskinURI && <Image style={Styles.onionskinImage} source={{ uri: this.state.onionskinURI }} />}
@@ -661,21 +706,4 @@ class SnappedPicture extends React.PureComponent<SnappedPictureProps, SnappedPic
 			</Animated.View>
 		)
 	}
-}
-
-const Ball = ({ size, left, top, stroke }: { size: number, left: number, top: number, stroke: string }) => {
-	return <View
-		style={{
-			width: size,
-			height: size,
-			transform: [{ translateX: -size/2 }, { translateY: -size/2 }],
-			borderRadius: size/2,
-			backgroundColor: stroke,
-			position: "absolute",
-			zIndex: 40,
-
-			left,
-			top
-		}}
-	/>
 }
