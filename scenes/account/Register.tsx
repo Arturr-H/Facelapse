@@ -3,13 +3,17 @@ import React from "react";
 import { StatusBar } from "expo-status-bar";
 import { View, KeyboardAvoidingView, Image, SafeAreaView, Text, TouchableHighlight } from "react-native";
 import Styles from "./Styles";
+import { StackNavigationProp } from "@react-navigation/stack";
+import { useNavigation } from "@react-navigation/native";
 
 /* Interfaces */
-interface Props {}
+interface Props {
+    navigation: StackNavigationProp<any, any>
+}
 interface State {}
 
 /* Main */
-export default class Register extends React.PureComponent {
+class Register extends React.PureComponent<Props, State> {
 	constructor(props: Props) {
 		super(props);
 	}
@@ -23,10 +27,10 @@ export default class Register extends React.PureComponent {
                     </View>
 
                     <View style={Styles.body}>
-                        <TouchableHighlight style={Styles.button} onPress={() => console.log("navigate signup")}>
+                        <TouchableHighlight style={Styles.button} onPress={() => this.props.navigation.navigate("SignUp")}>
                             <Text style={Styles.buttonText}>Sign Up</Text>
                         </TouchableHighlight>
-                        <TouchableHighlight style={Styles.button} onPress={() => console.log("navigate Login")}>
+                        <TouchableHighlight style={Styles.button} onPress={() => this.props.navigation.navigate("Login")}>
                             <Text style={Styles.buttonText}>Login</Text>
                         </TouchableHighlight>
                     </View>
@@ -36,4 +40,10 @@ export default class Register extends React.PureComponent {
             </SafeAreaView>
 		);
 	}
+}
+
+export default function(props: any) {
+	const navigation = useNavigation();
+  
+	return <Register {...props} navigation={navigation} />;
 }
