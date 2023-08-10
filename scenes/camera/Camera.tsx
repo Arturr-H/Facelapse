@@ -225,11 +225,11 @@ export default class CameraScene extends React.Component<Props, State> {
 
 		/* Flip image because for some reason expo
 			camera decides to save it mirrored... */
-		// const flippedImage = await manipulateAsync(
-		// 	this.state.photo!.uri,
-		// 	[{ flip: FlipType.Horizontal }],
-		// 	{ compress: 0.1, format: SaveFormat.JPEG }
-		// );
+		const flippedImage = await manipulateAsync(
+			this.state.photo!.uri,
+			[{ flip: FlipType.Horizontal }],
+			{ compress: 0.1, format: SaveFormat.JPEG }
+		);
 
 		/* Set onion skin overlay image  */
 		// TODO: maybe remove this
@@ -238,18 +238,18 @@ export default class CameraScene extends React.Component<Props, State> {
 		// });
 
 		/* Save photo to users media lib */
-		// MediaLibrary.saveToLibraryAsync(flippedImage.uri);
-		// this.setState({ flipped: flippedImage }, () => {
-			// });
+		MediaLibrary.saveToLibraryAsync(flippedImage.uri);
+			// this.setState({ flipped: this.state.photo }, () => {
+		// });
 
 		/* Capture the view shot (image with transformations) */
 		// @ts-ignore
-		this.viewShot!.current!.capture().then(e => {
-			MediaLibrary.saveToLibraryAsync(e);
+		// this.viewShot!.current!.capture().then(e => {
+		// 	MediaLibrary.saveToLibraryAsync(e);
 
-			/* Return to deafult state */
-			this.clearPicture();
-		});
+		// 	/* Return to deafult state */
+		// 	this.clearPicture();
+		// });
 
 		/* Upload to servers if user has upload key -- DEV ONLY */
 		// AsyncStorage.getItem("@dev_uid").then(async uid => {
@@ -283,6 +283,8 @@ export default class CameraScene extends React.Component<Props, State> {
 		let totalMetadata = await AsyncStorage.getItem("@calibrated_face_metadata");
 		if (totalMetadata) 
 			totalMetadata = JSON.parse(totalMetadata);
+
+		else totalMetadata = JSON.parse(`{"bounds":{"origin":{"y":281.23957923054695,"x":54.70416218042374},"size":{"height":275.31875905394554,"width":275.31875905394554}},"leftEarPosition":{"x":98.68749696016312,"y":411.4979168474674},"leftEyePosition":{"x":149.01458194851875,"y":383.5854159295559},"yawAngle":-0.7525003552436829,"rightEyePosition":{"x":241.21041831374168,"y":386.5458326935768},"leftMouthPosition":{"x":151.97499871253967,"y":482.9708358645439},"rightEarPosition":{"x":294.92083674669266,"y":411.075000166893},"leftCheekPosition":{"x":129.56041464209557,"y":445.7541679739952},"faceID":34,"rightCheekPosition":{"x":256.8583354949951,"y":449.56041809916496},"rollAngle":1.6910536289215088,"rightMouthPosition":{"x":228.10000121593475,"y":485.085419267416},"bottomMouthPosition":{"x":191.72916668653488,"y":501.15625312924385},"noseBasePosition":{"x":194.6895834505558,"y":431.79791751503944}}`)
 
 		this.setState({ onionskinURI, totalMetadata });
 	}
@@ -503,7 +505,7 @@ export default class CameraScene extends React.Component<Props, State> {
 
 				{/* The calibrated facial features are a bit transparent
 					and indicate where you should place your face on screen */}
-				{/* {(this.state.totalMetadata !== null && this.state.takingPicture === false) && 
+				{(this.state.totalMetadata !== null && this.state.takingPicture === false) && 
 					<CalibratedDots
 						leftEyePosition={this.state.totalMetadata.leftEyePosition}
 						leftMouthPosition={this.state.totalMetadata.leftMouthPosition}
@@ -511,7 +513,7 @@ export default class CameraScene extends React.Component<Props, State> {
 						rightMouthPosition={this.state.totalMetadata.rightMouthPosition}
 						calibrationDots={this.state.calibrationDots}
 					/>
-				} */}
+				}
 
 				{/* Modal */}
 				{this.state.photo && <Modal disable={this.clearPicture}>
@@ -551,14 +553,14 @@ export default class CameraScene extends React.Component<Props, State> {
 					}]}
 					type={CameraType.front}
 					flashMode={this.state.flashlightOn ? FlashMode.on : FlashMode.off}
-					onFacesDetected={this.handleFaceDetection}
-					faceDetectorSettings={{
-						mode: FaceDetector.FaceDetectorMode.accurate,
-						detectLandmarks: FaceDetector.FaceDetectorLandmarks.all,
-						runClassifications: FaceDetector.FaceDetectorClassifications.none,
-						minDetectionInterval: 5,
-						tracking: true,
-					}}
+					// onFacesDetected={this.handleFaceDetection}
+					// faceDetectorSettings={{
+					// 	mode: FaceDetector.FaceDetectorMode.accurate,
+					// 	detectLandmarks: FaceDetector.FaceDetectorLandmarks.none,
+					// 	runClassifications: FaceDetector.FaceDetectorClassifications.none,
+					// 	minDetectionInterval: 5,
+					// 	tracking: true,
+					// }}
 				/>
 
 				<View pointerEvents="none" style={Styles.viewShot}>
